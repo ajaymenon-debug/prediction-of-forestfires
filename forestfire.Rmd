@@ -1,0 +1,619 @@
+---
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+Lets first do the exploratory data analysis (EDA) performed to explore and understand the data.
+
+First we will read data into fireData with read.csv
+
+
+```{r, results="hide"}
+fireData <- read.csv("forestfires.csv")
+head(fireData)
+```
+```{r,results="hide"}
+dim(fireData)
+```
+  Here we can see the dimension of data set. There 517 records and 12 fields for the dataset
+  
+  Now we wil check data type of each of the field.
+  
+```{r, results="hide"}
+str(fireData)
+```
+Here we can see that month and day fields are having factor data type. Other fields are numeric and integer fields
+
+Now,Lets find the descriptive statistics of variables.
+
+```{r,results="hide"}
+summary(fireData)
+```
+Lets see some advanced descriptive statistics:
+
+```{r,results="hide"}
+library(psych)
+round(describe(fireData), 3)
+```
+Some observations from the Summary:
+  -X and Y are location variables which represent the location details that ranges from 1 - 9
+  -month and day fields are having factor data type. So it has multiple levels within it
+  -DC has an extremly high range
+  
+
+We can compare the standard deviation for variables
+```{r,results="hide"}
+sort(apply(fireData[-13], 2, sd))
+```
+
+The lowest standard deviation is for "FFMC" variable, and "DC" has the highest standard deviation.
+```{r,results="hide"}
+#boxplot(fireData, las=2, cex.axis = 1)
+```
+As seen before DC is having a high median as compared to other variable.
+
+It can also be seen that the area which is the field which needs to e predicted have few outliner values
+
+```{r,results="hide"}
+#boxplot(fireData$DMC, fireData$DC)
+```
+
+```{r,results="hide"}
+library(ggplot2)
+library(reshape2)
+m1 <- melt(as.data.frame(fireData[,-13]))
+ggplot(m1,aes(x = variable,y = value)) + 
+  facet_wrap(~variable) + 
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+The lowest standard deviation is for "FFMC" variable, and "DC" has the highest standard deviation.
+
+Lets now plot the variables using a scatterplot matrix to visualise the correlations between variables.
+
+```{r,results="hide"}
+pairs(fireData)
+```
+The observations from the scatterplot matrix are :
+
+There is a positive correlation between DMC and DC
+There is a negative correlation between temp and RH
+There is not much correlation between other variables
+```{r,results="hide"}
+par(pin=c(4,3))
+plot(fireData$DMC, fireData$DC, col = "blue", main='Scatter plot', ylab='DC', xlab='DMC')
+```
+Here we can closely see the positive correlation between DMC and DC
+
+```{r,results="hide"}
+par(pin=c(4,3))
+plot(fireData$temp, fireData$RH, col = "blue", main='Scatter plot', ylab='RH', xlab='Temp')
+```
+Here we can closely see the negative correlation between temp and RH
+
+Lets now see thw correlation coefficients for all pairs of variables
+```{r,results="hide"}
+cor(fireData[sapply(fireData, is.numeric)])
+
+```
+As found before, the maximum positive correlation is between DMC and DC and maximum negative correlation between temp and RH.
+
+Lets see the levelplot for the scatterplot matrix
+
+```{r,results="hide"}
+
+  library(lattice)
+  levelplot(cor(fireData[sapply(fireData, is.numeric)]), scales = list(x = list(rot = 90)))
+```
+
+```{r,results="hide"}
+#Define you own panel
+myPanel <- function(x, y, z, ...) {
+    panel.levelplot(x,y,z,...)
+    panel.text(x, y, round(z, 2))
+}
+#Define the color scheme
+cols = colorRampPalette(c("red","blue"))
+#Plot the correlation matrix.
+levelplot(cor(fireData[sapply(fireData, is.numeric)]), col.regions = cols(100), main = "correlation", xlab = NULL, ylab = NULL, 
+          scales = list(x = list(rot = 90)), panel = myPanel)
+```
+As found before, Here the level plot also we can find that the maximum positive correlation is between DMC and DC and maximum negative correlation between temp and RH. More blue means more positive correlation and more red means more negative correlation.
+
+```{r,results="hide"}
+par(mfrow = c(3, 3))
+hist(fireData$temp)
+hist(fireData$RH)
+hist(fireData$DMC)
+hist(fireData$rain)
+hist(fireData$ISI)
+hist(fireData$FFMC)
+hist(fireData$area)
+hist(fireData$DC)
+```
+Here after seeing the histogram of all the attributes, we can see that few fields like RH, ISI and area are left skewed.
+
+So for these fields it will be good if we can take log and fit these fields
+
+```{r,results="hide"}
+my_fit.orginal = lm(area~., data = fireData)
+summary(my_fit.orginal)
+```
+
+
+Initially during the data exploration, after plotting histogram, we found that there were few fields which were left skewed. Its good if we take log for those fields and fit the data
+
+```{r,results="hide"}
+summary(update(my_fit.orginal, . ~ . - RH + log(RH)))
+```
+There are not much change in the Adjusted R-squared value and the value is still negative. So its not of much use in using the log of RH.
+
+
+As specified in the question it is required to split the provided forestfires.csv into  training dataset (80%) and testing dataset (20%) before building the models as seen below.
+
+```{r,results="hide"}
+str(fireData)
+
+smp_size <- floor(0.80 * nrow(fireData))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(fireData)), size = smp_size)
+
+train <- fireData[train_ind, ]
+test <- fireData[-train_ind, ]
+
+dim(train)
+dim(test)
+```
+
+Here we have split the provided forestfires.csv into  training dataset (80%) and testing dataset (20%) with 413 and 104 records each.
+
+As found before, we have month and days as factor variables. We will need to convert them to dummy varibles using the dummies library.
+
+```{r,results="hide"}
+library(dummies)
+fireData.new <- dummy.data.frame(fireData, sep = ".")
+str(fireData.new)
+dim(fireData.new)
+```
+
+
+```{r,results="hide"}
+smp_size_new <- floor(0.80 * nrow(fireData.new))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind_new <- sample(seq_len(nrow(fireData.new)), size = smp_size_new)
+
+train.new <- fireData.new[train_ind_new, ]
+test.new <- fireData.new[-train_ind_new, ]
+
+dim(train.new)
+dim(test.new)
+```
+Here we have split the forestfires.csv with dummy variables into  training dataset (80%) and testing dataset (20%) with 413 and 104 records each.
+
+
+```{r,results="hide"}
+sum(is.na(fireData$area))
+```
+Here there is no empty fields for area fields. So we dont need to omit any rows
+
+
+Building the Linear Regression Model
+Now lets try fitting all variables to see what appears to be important
+```{r,results="hide"}
+my_fit = lm(area~., data = train)
+summary(my_fit)
+```
+Here we are getting a -ve value for the Adjusted R-squared, which means the there are  too many predictiors and the sample size is small for that. Negative Adjusted R-squared means insignificance of explanatory variables.
+The model is not that good and we will need to do some modifications 
+
+Lets try removing the month and day variables just to see if there's any change in the Adjusted R-squared. 
+```{r,results="hide"}
+my_fit2= lm(area~., data = subset(fireData, select=c( -month, -day )))
+summary(my_fit2)
+```
+Here after removing month and day variables, we can see that after removing month and day variables, the Adjusted R-squared have become a +ve value, but still a very small value. But the Pr(>|t|) for each of the indivitual fields are quite high, so still some improvements can be done model.
+
+```{r,results="hide"}
+library("car")
+outlierTest(my_fit, cutoff=0.05, digits = 1)
+```
+Here we can see that there are 2 rows which are have having extreme values. 
+
+Lets try removing them and fit the data and see if there's any difference in the model
+
+```{r,results="hide"}
+fireData.outliner <- fireData.new[-c(239, 416), ]
+my_fit.new = lm(area~., data = fireData.outliner)
+summary(my_fit.new)
+```
+When we see the summary for the new model after removing the ourliner, Adjusted R-squared and now become 0.003942 . Before it was -0.006905. The Adjusted R-squared have become a +ve value, but still a very small value.
+There is also a reduction is in the Pr(>|t|) value of DMC and DC which shows that DMC and DC have  a significant impact on the prediction of the burned area;
+
+```{r,results="hide"}
+smp_size_new <- floor(0.80 * nrow(fireData.outliner))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind_new <- sample(seq_len(nrow(fireData.outliner)), size = smp_size_new)
+
+train.new <- fireData.outliner[train_ind_new, ]
+test.new <- fireData.outliner[-train_ind_new, ]
+
+dim(train.new)
+dim(test.new)
+```
+Here we can see that both in test and train detaset 1 data record have been removed after removing the outliners
+
+Let fit the model of the dataset with the dummy varibales
+```{r,results="hide"}
+my_fit.new = lm(area~., data = train.new)
+summary(my_fit.new)
+```
+Here the Adjusted R-squared for the model with and without dummy variables almost remains the same.
+But here we can see few month fields with low Pr(>|t|) value.
+
+As seen, the DMC and DC are having the least Pr(>|t|) and lets first fit a model with only these attributes
+```{r,results="hide"}
+my_fit.new2 = lm(area~DMC + DC, data = train.new)
+summary(my_fit.new2)
+```
+Here we can see that Adjusted R-squared is slightly more than the model with all the attributes
+
+Let do some diagnostic plots now.
+
+```{r,results="hide"}
+par(mfcol=c(2,2))
+plot(my_fit.new)
+```
+The residual vs fitted plot:  The points are not equally spread around the horizontal line. This indicates that there is not linear relationship between the variables in the model. 
+So we can conclude that there is a non-linear relationship between area and all the predictors, as the residuals are not scattered evenly.
+
+The normal Q-Q plot: The residuals do not deviate significantly from the dashed line, indicating the residuals are mostly normally distributed 
+
+Scale-Location - The scale-location plot shows that the residuals do not appear randomly spread and lie close to each other. This shows that mostly . Hence the model violates the assumption of equal variance as it does not spread equally
+
+Residuals vs Leverage - The chart shows there arent any possibly influential outliers. As seen the outliners lie inside the crooks distance in top left of the chart. For these to be influential, it has to lie in the top right and outside the crooks distance curve. Hence there are no influential outliers in our case
+
+
+Instead of manually selecting a subset of variables that are strongly associated with the predictor, let use the R step function that does automatic approaches of variable selection.
+
+
+Lets now do the step function on the fit with dummy variables
+```{r,results="hide"}
+step1.new<- step(my_fit.new,steps = 100)
+```
+As shown above, the best model is selected based on AIC value. Here the best model which they show is having the fields  month.aug + day.fri + day.thu + DMC + ISI + temp + wind with an AIC value of 2752.35 
+
+Lets now fit the model with only these selected attributes given by the step funtion.
+```{r,results="hide"}
+my_fit.selected = lm(area~month.aug + day.fri + day.thu + DMC + ISI + temp + wind, data = train.new)
+summary(my_fit.selected)
+```
+
+Here by fitting just the attributes month.aug + day.fri + day.thu + DMC + ISI + 
+    temp + wind , Adjusted R-squared have become 0.02093 this value value indicates this model explains 0.2% of the variation in area.
+
+
+Summary :
+Adjusted R-squared of orginal train data:  0.001699 
+Adjusted R-squared of model with DMC + DC: 0.002608 (selected by comparing Pr(>|t|) values)
+Adjusted R-squared of model with month.aug + day.fri + day.thu + DMC + ISI + temp + wind : 0.02093 (Selected by step function)
+
+From this it is very clear that model with the field month.aug + day.fri + day.thu + DMC + ISI + temp + wind is the best model as its has the maximimum Adjusted R-squared: and the Pr(>|t|)  is very small for all the fields.
+
+
+Subset Selection:
+Subset selection will help in identifying a subset of predictors that we believe have a strong association area variable
+
+```{r,results="hide"}
+library(leaps)
+regfit.full=regsubsets(area~.,train.new,nvmax=30)
+summary(regfit.full)
+```
+An asterisk indicates that a given variable is included in the corresponding model. For instance, this output indicates that the best seven-variable model contains only month.aug , temp , wind , day.fri , day.thu , DMC, ISI. This is same as we found using the step function before.
+
+Lets see the summary for the R square statistic
+
+```{r,results="hide"}
+reg.summary=summary(regfit.full)
+reg.summary$rsq
+```
+Here we can see the R square statistic for each row. 
+
+```{r,results="hide"}
+minrsq= which.min(reg.summary$rsq)
+minrsq
+coef(regfit.full, minrsq)
+```
+This shows that the minimum R square statistic is when its just 1 varible and its value is 0.009573469 and the variable is wind
+
+First, let's find the best overall model using Mallow's CP.
+```{r,results="hide"}
+mincp = which.min(reg.summary$cp)
+mincp
+```
+This shows that the minimum cp statistic is when its 4 varibles.
+
+Lets plot the cp statistic to find the minimum.
+```{r,results="hide"}
+plot(reg.summary$cp, xlab = "Number of variables", ylab = "C_p", type = "l")
+points(mincp, reg.summary$cp[mincp], col = "red", cex = 2, pch = 20)
+```
+The plot suggests that the best overall model is a model with 4 variables
+
+```{r,results="hide"}
+coef(regfit.full, mincp)
+```
+This suggests that the minimum cp is when the variables day.mon,day.tue,ISI ,RH  are selected
+
+Similary lets check for BIC now.
+
+```{r,results="hide"}
+plot(reg.summary$bic, xlab = "Number of variables", ylab = "BIC", type = "l")
+minbic = which.min(reg.summary$bic)
+points(minbic, reg.summary$bic[minbic], col = "red", cex = 2, pch = 20)
+minbic
+coef(regfit.full, minbic)
+```
+This shows that the minimum BIC statistic is when its just 1 varible and the variable is wind
+
+```{r,results="hide"}
+plot(reg.summary$adjr2, xlab = "Number of variables", ylab = "Adjusted R^2", type = "l")
+max_adjr2 = which.max(reg.summary$adjr2)
+max_adjr2
+points(max_adjr2, reg.summary$adjr2[max_adjr2 ], col = "red", cex = 2, pch = 20)
+coef(regfit.full, max_adjr2)
+
+```
+This shows that the Adjusted R^2 maximum when 13 variables are selected 
+
+
+
+```{r,results="hide"}
+plot(regfit.full,scale="r2")
+plot(regfit.full,scale="adjr2")
+plot(regfit.full,scale="Cp")
+plot(regfit.full,scale="bic")
+```
+From here we can conclude that considering all the statistics, we get different output for different value.
+Wind is a common attribute that has occured multiple times and we have to make a note of it as it suggests us that it plays a vital role in prediction of the area variable.
+
+
+
+Lets now do stepwise selection to explore a far more restricted set of models. 
+First, lets do forward selection
+```{r,results="hide"}
+regfit.fwd=regsubsets (area~.,data=train.new ,nvmax=30, method ="forward")
+summary(regfit.fwd)
+reg.summary.fwd <- summary(regfit.fwd)
+```
+We are getting similar results as the best subset selection which we did before. For instance, this output indicates that the best three-variable model contains only X , day.sat , temp . This is same as we got in best subset selection before.
+
+But there are few changes if we closely compare the 2 model. Lets consider the 5 variable model.
+In forward selection, we get month.jul, day.fri, day.thu, DMC, ISI
+Whereas, in subset selection, we get temp, day.fri, day.thu, DMC, ISI
+Here we can see that there is differnce of 1 attribute in both the methods
+
+Lets generate a set of plots to identify the best overall model as follows.
+```{r,results="hide"}
+par(mfrow = c(2, 2))
+plot(reg.summary.fwd$cp, xlab = "Number of variables", ylab = "C_p", type = "l")
+points(which.min(reg.summary.fwd$cp), reg.summary.fwd$cp[which.min(reg.summary.fwd$cp)], col = "red", cex = 2, pch = 20)
+plot(reg.summary.fwd$bic, xlab = "Number of variables", ylab = "BIC", type = "l")
+points(which.min(reg.summary.fwd$bic), reg.summary.fwd$bic[which.min(reg.summary.fwd$bic)], col = "red", cex = 2, pch = 20)
+plot(reg.summary.fwd$adjr2, xlab = "Number of variables", ylab = "Adjusted R^2", type = "l")
+points(which.max(reg.summary.fwd$adjr2), reg.summary.fwd$adjr2[which.max(reg.summary.fwd$adjr2)], col = "red", cex = 2, pch = 20)
+plot(reg.summary.fwd$rss, xlab = "Number of variables", ylab = "RSS", type = "l")
+mtext("Plots of C_p, BIC, adjusted R^2 and RSS for forward stepwise selection", side = 3, line = -2, outer = TRUE)
+```
+```{r,results="hide"}
+mincp.fwd = which.min(reg.summary.fwd$cp)
+mincp.fwd 
+minbic.fwd = which.min(reg.summary.fwd$bic)
+minbic.fwd
+minadj2.fwd = which.max(reg.summary.fwd$adjr2)
+minadj2.fwd
+```
+Here we are getting same result for Cp and BIC, but for adjr2 in forward selection its a 9 variable model whereas in subset selection it was 13 variable model.
+
+```{r,results="hide"}
+coef(regfit.fwd, mincp.fwd)
+coef(regfit.fwd, minbic.fwd)
+coef(regfit.fwd, minadj2.fwd)
+```
+
+Here we can see the variables that are selected for forward selection. Here we are getting same result for Cp and BIC, but for adjr2 we are getting some extra variables.
+
+Here also we can see that , Wind is a common attribute that has occured multiple times and so we have to make a note of it as it suggests us that it plays a vital role in prediction of the area variable
+
+
+
+Lets do Backward selection now
+
+```{r,results="hide"}
+regfit.bwd=regsubsets (area~.,data=train.new ,nvmax=30, method ="backward")
+summary(regfit.bwd)
+reg.summary.bwd <- summary(regfit.bwd)
+```
+We are getting similar results as the best subset selection and forward selection which we did before. For instance, this output indicates that the best three-variable model contains only X , day.sat , temp . This is same as we got in best subset selection before.
+
+But there are few changes if we closely compare the previous model. Lets consider the 5 variable model example which we took before
+
+Forward selection:  month.jul, day.fri, day.thu, DMC, ISI
+Backward selection: month.jul, day.fri, day.thu, DMC, ISI
+Subset selection:   temp, day.fri, day.thu, DMC, ISI
+
+Lets generate a set of plots to identify the best overall model as follows.
+
+
+
+```{r,results="hide"}
+par(mfrow = c(2, 2))
+plot(reg.summary.bwd$cp, xlab = "Number of variables", ylab = "C_p", type = "l")
+points(which.min(reg.summary.bwd$cp), reg.summary.bwd$cp[which.min(reg.summary.bwd$cp)], col = "red", cex = 2, pch = 20)
+plot(reg.summary.bwd$bic, xlab = "Number of variables", ylab = "BIC", type = "l")
+points(which.min(reg.summary.bwd$bic), reg.summary.bwd$bic[which.min(reg.summary.bwd$bic)], col = "red", cex = 2, pch = 20)
+plot(reg.summary.bwd$adjr2, xlab = "Number of variables", ylab = "Adjusted R^2", type = "l")
+points(which.max(reg.summary.bwd$adjr2), reg.summary.bwd$adjr2[which.max(reg.summary.bwd$adjr2)], col = "red", cex = 2, pch = 20)
+plot(reg.summary.bwd$rss, xlab = "Number of variables", ylab = "Adjusted R^2", type = "l")
+mtext("Plots of C_p, BIC, adjusted R^2 and RSS for backward stepwise selection", side = 3, line = -2, outer = TRUE)
+```
+```{r,results="hide"}
+mincp.bwd = which.min(reg.summary.bwd$cp)
+mincp.bwd 
+minbic.bwd = which.min(reg.summary.bwd$bic)
+minbic.bwd
+minadj2.bwd = which.max(reg.summary.bwd$adjr2)
+minadj2.bwd
+```
+
+Here we are getting same result for Cp and BIC, but for adjr2 in backward selection there is a difference its a 5 variable model which we are getting.
+
+```{r,results="hide"}
+coef(regfit.bwd, mincp.bwd)
+coef(regfit.bwd, minbic.bwd)
+coef(regfit.bwd, minadj2.bwd)
+```
+
+Here we can see the variables that are selected for backward selection. 
+Here in backward selection we can see that are different fields that are been selected
+
+
+Ridge regression
+
+If alpha = 0 then a ridge regression model is fit
+```{r,results="hide"}
+library(glmnet)
+grid <- 10^seq(4, -2, length = 100)
+
+x=model.matrix(area~.,train.new)[,-1]
+y=train.new$area
+x_test = model.matrix(area~.,test.new)[,-1]
+
+set.seed(1)# the purpose of fixing the seed of the random number generator is to make the result repeatable.
+fit.ridge <- glmnet(x,y, alpha = 0, lambda = grid, thresh = 1e-12)
+cv.ridge <- cv.glmnet(x,y, alpha = 0, lambda = grid, thresh = 1e-12)
+bestlam.ridge <- cv.ridge$lambda.min
+bestlam.ridge
+```
+This shows that min value of λ = 533.6699
+
+We can use the predict() function to obtain the ridge regression coefficients for the minimum value of λ
+
+```{r,results="hide"}
+predict(fit.ridge, , s = bestlam.ridge,type = "coefficients")[1:30, ]
+
+```
+ Here we get the attributes with its coefficients which is the best model selected by Ridge regression
+ 
+ We can now predict the value and find the MSE of this model
+
+```{r,results="hide"}
+x_test = model.matrix(area~.,test.new)[,-1]
+pred.ridge <- predict(fit.ridge, s=bestlam.ridge,newx=x_test)
+mean((pred.ridge - test.new$area)^2)
+```
+Here MSE = 547.3395
+
+
+Now lets perform Lasso,
+The Lasso
+Performing Lasso:
+If alpha=1 then a lasso model is fit
+
+
+```{r,results="hide"}
+library(glmnet)
+
+
+cv.lasso <- cv.glmnet(x, y,alpha = 1, lambda = grid, thresh = 1e-12)
+plot(cv.lasso)
+
+```
+```{r,results="hide"}
+dim(coef(cv.lasso))
+```
+
+```{r,results="hide"}
+set.seed(1)# the purpose of fixing the seed of the random number generator is to make the result repeatable.
+fit.lasso <- glmnet(x,y, alpha = 1, lambda = grid, thresh = 1e-12)
+cv.lasso <- cv.glmnet(x,y, alpha = 1, lambda = grid, thresh = 1e-12)
+bestlam.lasso <- cv.lasso$lambda.min
+bestlam.lasso
+```
+
+ 
+ We can now predict the value and find the MSE of lasso model
+
+```{r,results="hide"}
+
+pred.lasso <- predict(fit.lasso, s=bestlam.lasso,newx=x_test)
+mean((pred.lasso - test.new$area)^2)
+```
+Hence MSE of lasso model =  547.9174
+
+
+Just for comparison let fit a normal linear regression model which we created before with all the attributes together.Lets check the MSE of this model
+
+
+```{r,results="hide"}
+pred.lm<- predict(my_fit.new, test.new)
+mean((pred.lm  - test.new$area)^2)
+```
+
+```{r,results="hide"}
+mean((pred.lm - test.new$area)^2)
+mean((pred.ridge - test.new$area)^2)
+mean((pred.lasso - test.new$area)^2)
+```
+
+The lowest MSE is drived by the Ridge model out of these.
+As we can see Ridge and Lasso model, both had almost the same MSE. It was just that Ridge had a slight lesser MSE than lasso. 
+Hence the best model out of these based on the MSE is Ridge model
+
+Now lets find the MSE of the models which we find before.
+First lets condiser the model with selected fields using the Pr(>|t|)  of the attributes in the morginal model and we found that DMC and DC has the least p value
+So model include 2 attribute - DMC + DC,
+```{r,results="hide"}
+
+pred.lm_pvalue<- predict(my_fit.new2, test.new)
+mean((pred.lm_pvalue  - test.new$area)^2)
+```
+MSE of the model with selected fields DMC + DC = 560.4533
+
+
+Now lets condiser the model with selected fields using the step function. Based on the lowest AIC value, we selected these attributes.
+So this model includes 7 attribute - month.aug + day.fri + day.thu + DMC + ISI + temp + wind ,
+
+```{r,results="hide"}
+#my_fit2.new = lm(area~X + day.sat + temp, data = train.new) - We had executed this before
+pred.lm_selected <- predict(my_fit.selected, test.new)
+mean((pred.lm_selected   - test.new$area)^2)
+```
+MSE of the model with selected fields month.aug + day.fri + day.thu + DMC + ISI + temp + wind = 568.2332
+
+
+```{r,results="hide"}
+mean((pred.lm - test.new$area)^2)
+mean((pred.ridge - test.new$area)^2)
+mean((pred.lasso - test.new$area)^2)
+mean((pred.lm_selected   - test.new$area)^2)
+mean((pred.lm_pvalue   - test.new$area)^2)
+```
+Here we can see that lowest MSE is still drived by the Ridge model out of these.
+As we can see Ridge and Lasso model, both had almost the same MSE. It was just that Ridge had a slight lesser MSE than lasso. 
+Hence the best model out of these based on the MSE is Ridge model out of the selected models
+
+
